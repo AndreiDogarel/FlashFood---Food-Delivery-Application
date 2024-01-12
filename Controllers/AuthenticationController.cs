@@ -1,8 +1,13 @@
-﻿using FlashFood.Models;
+﻿using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using System.Text;
+using FlashFood.Models;
+using FlashFood.Models.Authentication.LogIn;
 using FlashFood.Models.Authentication.SignUp;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.IdentityModel.Tokens;
 using User.Management.Service.Models;
 using User.Management.Service.Services.EmailService;
 
@@ -85,6 +90,56 @@ namespace FlashFood.Controllers
             }
             return StatusCode(StatusCodes.Status500InternalServerError,
                 new Response { Status = "Error", Message = "There is no User with this email!" });
+        }
+
+        [HttpPost]
+        [Route("login")]
+        public async Task<IActionResult> Login([FromBody] LoginModel loginModel)
+        {
+            // Checking the user
+            var user = await _userManager.FindByNameAsync(loginModel.Username);
+            if(user != null && await _userManager.CheckPasswordAsync(user, loginModel.Password))
+            {
+                // Create claimlist
+                var authClaims = new List<Claim>
+                {
+                    new Claim(ClaimTypes.Name, user.UserName),
+                    new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
+                };
+
+                // Add roles to the claimlist
+                var userRoles = await _userManager.GetRolesAsync(user);
+                foreach(var role in userRoles)
+                {
+                    authClaims.Add(new Claim(ClaimTypes.Role, role));
+                }
+
+                // Generate the token with the claims
+                var jwtToken = GetToken(authClaims);
+
+                // Return the token
+                return Ok(new
+                {
+                    token = new JwtSecurityTokenHandler().WriteToken(jwtToken),
+                    expiration = jwtToken.ValidTo
+                });
+            }
+            return Unauthorized();
+        }
+
+        private JwtSecurityToken GetToken(List<Claim> authClaims)
+        {
+            var authSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_configuration["JWT:Secret"]));
+
+            var token = new JwtSecurityToken(
+                issuer: _configuration["JWT:ValidIssuer"],
+                audience: _configuration["JWT:ValidAudience"],
+                expires: DateTime.Now.AddHours(3),
+                claims: authClaims,
+                signingCredentials: new SigningCredentials(authSigningKey, SecurityAlgorithms.HmacSha256)
+            );
+
+            return token;
         }
     }
 }
