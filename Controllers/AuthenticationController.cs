@@ -1,15 +1,23 @@
-﻿using System.IdentityModel.Tokens.Jwt;
+﻿using System.ComponentModel.DataAnnotations;
+using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
 using FlashFood.Models;
-using FlashFood.Models.Authentication.LogIn;
+using FlashFood.Models.Authentication;
 using FlashFood.Models.Authentication.SignUp;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Identity.Data;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.IdentityModel.Tokens;
 using User.Management.Service.Models;
 using User.Management.Service.Services.EmailService;
+using MimeKit;
+using MailKit.Net.Smtp;
+using User.Management.Service.Models.Authentication.SignUp;
+using User.Management.Service.Models.Authentication.LogIn;
+using User.Management.Service.Services;
 
 namespace FlashFood.Controllers
 {
@@ -21,61 +29,35 @@ namespace FlashFood.Controllers
         private readonly RoleManager<IdentityRole> _roleManager;
         private readonly IConfiguration _configuration;
         private readonly IEmailService _emailService;
+        private readonly IUserService _userService;
         public AuthenticationController(UserManager<IdentityUser> userManager, RoleManager<IdentityRole> roleManager, 
-            IConfiguration configuration, IEmailService emailService)
+            IConfiguration configuration, IEmailService emailService, IUserService userService)
         {
             _userManager = userManager;
             _roleManager = roleManager;
             _configuration = configuration;
             _emailService = emailService;
+            _userService = userService;
+
         }
         [HttpPost]
-        public async Task<IActionResult> Register([FromBody] RegisterUser registerUser, string role)
+        public async Task<IActionResult> Register([FromBody] RegisterUser registerUser)
         {
-            // Check User exists
-            var userExist = await _userManager.FindByEmailAsync(registerUser.Email);
-            if(userExist != null) 
+            var tokenResponse = await _userService.CreateUserWithTokenAsync(registerUser);
+            if (tokenResponse.IsSuccess)
             {
-                return StatusCode(StatusCodes.Status403Forbidden, 
-                    new Response { Status = "Error", Message = "User already exists!"});
-            }
-
-            // Add User to Database
-            IdentityUser user = new()
-            {
-                Email = registerUser.Email,
-                SecurityStamp = Guid.NewGuid().ToString(),
-                UserName = registerUser.Username
-            };
-            if(await _roleManager.RoleExistsAsync(role))
-            {
-                var result = await _userManager.CreateAsync(user, registerUser.Password);
-                if (!result.Succeeded)
-                {
-                    return StatusCode(StatusCodes.Status500InternalServerError,
-                        new Response { Status = "Error", Message = "User failed to create!" });
-                }
-                // Add role to the user
-                await _userManager.AddToRoleAsync(user, role);
-
-
-                // Add Token to Verify the Email
-                var token = await _userManager.GenerateEmailConfirmationTokenAsync(user);
-                var confirmationLink = Url.Action(nameof(ConfirmEmail), "Authentication", new { token, email = user.Email }, Request.Scheme);
-                var message = new Message(new string[] { user.Email! }, "Confirmation Email Link", confirmationLink!);
+                await _userService.AssignRoleToUserAsync(registerUser.Roles, tokenResponse.Response.User);
+                var confirmationLink = Url.Action(nameof(ConfirmEmail), "Authentication", new { tokenResponse.Response.Token, email = registerUser.Email }, Request.Scheme);
+                var message = new Message(new string[] { registerUser.Email! }, "Confirmation Email Link", confirmationLink!);
                 _emailService.SendEmail(message);
-
                 return StatusCode(StatusCodes.Status200OK,
-                    new Response { Status = "Success", Message = $"User created and email sent to {user.Email} successfully!" });
+                    new Response { Status = "Success", Message = "Email Verified Successfully!", IsSuccess = true });
             }
-            else
-            {
-                return StatusCode(StatusCodes.Status500InternalServerError,
-                    new Response { Status = "Error", Message = "This role does not exist!" });
-            }
+            return StatusCode(StatusCodes.Status500InternalServerError,
+                new Response {Message = tokenResponse.Message, IsSuccess = false });
         }
 
-        [HttpGet("ConfirmEmail")]
+        [HttpGet("confirm-email")]
         public async Task<IActionResult> ConfirmEmail(string token, string email)
         {
             var user = await _userManager.FindByEmailAsync(email);
@@ -140,6 +122,59 @@ namespace FlashFood.Controllers
             );
 
             return token;
+        }
+
+        [HttpPost]
+        [AllowAnonymous]
+        [Route("forgot-password")]
+        public async Task<IActionResult> ForgotPassword([Required] string email)
+        {
+            var user = await _userManager.FindByEmailAsync(email);
+            if(user != null)
+            {
+                var token = await _userManager.GeneratePasswordResetTokenAsync(user);
+                var forgotPasswordLink = Url.Action(nameof(ResetPassword), "Authentication", new { token, email = user.Email }, Request.Scheme);
+                var message = new Message(new string[] { user.Email! }, "Password Change Request", forgotPasswordLink!);
+                _emailService.SendEmail(message);
+                return StatusCode(StatusCodes.Status200OK,
+                    new Response { Status = "Success", Message = $"Password Change Request Has Been Sent To {user.Email}!" });
+            }
+            return StatusCode(StatusCodes.Status500InternalServerError,
+                new Response { Status = "Error", Message = "There is no User with this email!" });
+        }
+
+        [HttpGet("reset-password")]
+        public async Task<IActionResult> ResetPassword(string token, string email)
+        {
+            var model = new ResetPassword { Token = token, Email = email }; 
+            return Ok(new
+            {
+                model
+            });
+        }
+
+        [HttpPost]
+        [AllowAnonymous]
+        [Route("reset-password")]
+        public async Task<IActionResult> ResetPassword(ResetPassword resetPassword)
+        {
+            var user = await _userManager.FindByEmailAsync(resetPassword.Email);
+            if(user != null)
+            {
+                var resetPasswordResult = await _userManager.ResetPasswordAsync(user, resetPassword.Token, resetPassword.Password);
+                if(!resetPasswordResult.Succeeded)
+                {
+                    foreach(var error in resetPasswordResult.Errors)
+                    {
+                        ModelState.AddModelError(error.Code, error.Description);
+                    }
+                    return Ok(ModelState);
+                }
+                return StatusCode(StatusCodes.Status200OK,
+                    new Response { Status = "Success", Message = "Password Has Been Changed!" });
+            }
+            return StatusCode(StatusCodes.Status400BadRequest,
+                new Response { Status = "Error", Message = "There is no User with this email!" });
         }
     }
 }

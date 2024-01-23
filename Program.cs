@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using User.Management.Service.Models;
+using User.Management.Service.Services;
 using User.Management.Service.Services.EmailService;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -26,6 +27,7 @@ builder.Services.AddIdentity<IdentityUser, IdentityRole>()
 builder.Services.Configure<IdentityOptions>(
     opts => opts.SignIn.RequireConfirmedEmail = true
     );
+builder.Services.Configure<DataProtectionTokenProviderOptions>(opts => opts.TokenLifespan = TimeSpan.FromHours(10));
 
 // Adding Authentication
 builder.Services.AddAuthentication(options =>
@@ -53,7 +55,8 @@ var emailConfig = builder.Configuration
          .Get<EmailConfiguration>();
 builder.Services.AddSingleton(emailConfig);
 
-builder.Services.AddTransient<IEmailService, EmailService>();
+builder.Services.AddScoped<IEmailService, EmailService>();
+builder.Services.AddScoped<IUserService, UserService>();
 
 // Add services to the container.
 
