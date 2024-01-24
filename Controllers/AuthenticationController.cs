@@ -18,6 +18,8 @@ using MailKit.Net.Smtp;
 using User.Management.Service.Models.Authentication.SignUp;
 using User.Management.Service.Models.Authentication.LogIn;
 using User.Management.Service.Services;
+using User.Management.Data.Data;
+using System.Security.Cryptography;
 
 namespace FlashFood.Controllers
 {
@@ -25,12 +27,12 @@ namespace FlashFood.Controllers
     [ApiController]
     public class AuthenticationController : ControllerBase
     {
-        private readonly UserManager<IdentityUser> _userManager;
+        private readonly UserManager<ApplicationUser> _userManager;
         private readonly RoleManager<IdentityRole> _roleManager;
         private readonly IConfiguration _configuration;
         private readonly IEmailService _emailService;
         private readonly IUserService _userService;
-        public AuthenticationController(UserManager<IdentityUser> userManager, RoleManager<IdentityRole> roleManager, 
+        public AuthenticationController(UserManager<ApplicationUser> userManager, RoleManager<IdentityRole> roleManager, 
             IConfiguration configuration, IEmailService emailService, IUserService userService)
         {
             _userManager = userManager;
@@ -41,6 +43,7 @@ namespace FlashFood.Controllers
 
         }
         [HttpPost]
+        [Route("register")]
         public async Task<IActionResult> Register([FromBody] RegisterUser registerUser)
         {
             var tokenResponse = await _userService.CreateUserWithTokenAsync(registerUser);
@@ -51,7 +54,7 @@ namespace FlashFood.Controllers
                 var message = new Message(new string[] { registerUser.Email! }, "Confirmation Email Link", confirmationLink!);
                 _emailService.SendEmail(message);
                 return StatusCode(StatusCodes.Status200OK,
-                    new Response { Status = "Success", Message = "Email Verified Successfully!", IsSuccess = true });
+                    new Response { Status = "Success", Message = "Email Sent Successfully!", IsSuccess = true });
             }
             return StatusCode(StatusCodes.Status500InternalServerError,
                 new Response {Message = tokenResponse.Message, IsSuccess = false });
@@ -98,6 +101,11 @@ namespace FlashFood.Controllers
 
                 // Generate the token with the claims
                 var jwtToken = GetToken(authClaims);
+                var refreshToken = GenerateRefreshToken();
+                _ = int.TryParse(_configuration["JWT:RefreshTokenValidity"], out int refreshTokenValidity);
+                user.RefreshToken = refreshToken;
+                user.RefreshTokenExpiry = DateTime.UtcNow.AddDays(refreshTokenValidity);
+                await _userManager.UpdateAsync(user);
 
                 // Return the token
                 return Ok(new
@@ -107,21 +115,6 @@ namespace FlashFood.Controllers
                 });
             }
             return Unauthorized();
-        }
-
-        private JwtSecurityToken GetToken(List<Claim> authClaims)
-        {
-            var authSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_configuration["JWT:Secret"]));
-
-            var token = new JwtSecurityToken(
-                issuer: _configuration["JWT:ValidIssuer"],
-                audience: _configuration["JWT:ValidAudience"],
-                expires: DateTime.Now.AddHours(3),
-                claims: authClaims,
-                signingCredentials: new SigningCredentials(authSigningKey, SecurityAlgorithms.HmacSha256)
-            );
-
-            return token;
         }
 
         [HttpPost]
@@ -176,5 +169,38 @@ namespace FlashFood.Controllers
             return StatusCode(StatusCodes.Status400BadRequest,
                 new Response { Status = "Error", Message = "There is no User with this email!" });
         }
+
+        #region PrivateMethods
+        private JwtSecurityToken GetToken(List<Claim> authClaims)
+        {
+            var authSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_configuration["JWT:Secret"]));
+            _ = int.TryParse(_configuration["JWT:TokenValidityInMinutes"], out int tokenValidityInMinutes);
+            var expirationTimeUtc = DateTime.UtcNow.AddMinutes(tokenValidityInMinutes);
+            if (expirationTimeUtc.Kind == DateTimeKind.Local)
+            {
+                expirationTimeUtc = DateTime.SpecifyKind(expirationTimeUtc, DateTimeKind.Utc);
+            }
+            var expirationTimeInLocalTimeZone = TimeZoneInfo.ConvertTimeToUtc(expirationTimeUtc, TimeZoneInfo.Utc);
+
+
+            var token = new JwtSecurityToken(
+                issuer: _configuration["JWT:ValidIssuer"],
+                audience: _configuration["JWT:ValidAudience"],
+                expires: expirationTimeInLocalTimeZone,
+                claims: authClaims,
+                signingCredentials: new SigningCredentials(authSigningKey, SecurityAlgorithms.HmacSha256)
+            );
+
+            return token;
+        }
+
+        private string GenerateRefreshToken()
+        {
+            var randomNumber = new Byte[64];
+            var range = RandomNumberGenerator.Create();
+            range.GetBytes(randomNumber);
+            return Convert.ToBase64String(randomNumber);
+        }
+        #endregion
     }
 }
