@@ -1,4 +1,3 @@
-using System.Configuration;
 using System.Text;
 using FlashFood.Data;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -9,7 +8,6 @@ using Microsoft.OpenApi.Models;
 using User.Management.Data.Data;
 using User.Management.Service.Models;
 using User.Management.Service.Services;
-using User.Management.Service.Services.EmailService;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -20,15 +18,25 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
     ));
 
 // For Identity
-builder.Services.AddIdentity<ApplicationUser, IdentityRole>()
+/*builder.Services.AddIdentity<ApplicationUser, IdentityRole>()
     .AddEntityFrameworkStores<ApplicationDbContext>()
+    .AddDefaultTokenProviders();*/
+
+builder.Services.AddIdentity<ApplicationUser, IdentityRole>(options =>
+{
+    options.Tokens.ProviderMap["Email"] = new TokenProviderDescriptor(typeof(EmailTokenProvider<ApplicationUser>));
+}).AddEntityFrameworkStores<ApplicationDbContext>()
     .AddDefaultTokenProviders();
+
+builder.Services.Configure<DataProtectionTokenProviderOptions>(options =>
+{
+    options.TokenLifespan = TimeSpan.FromMinutes(5);
+});
 
 // Add Configuration for Required Email
 builder.Services.Configure<IdentityOptions>(
     opts => opts.SignIn.RequireConfirmedEmail = true
     );
-builder.Services.Configure<DataProtectionTokenProviderOptions>(opts => opts.TokenLifespan = TimeSpan.FromHours(10));
 
 // Adding Authentication
 builder.Services.AddAuthentication(options =>

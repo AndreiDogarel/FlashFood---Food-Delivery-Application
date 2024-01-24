@@ -1,25 +1,12 @@
-﻿using System.ComponentModel.DataAnnotations;
-using System.IdentityModel.Tokens.Jwt;
-using System.Security.Claims;
-using System.Text;
-using FlashFood.Models;
-using FlashFood.Models.Authentication;
-using FlashFood.Models.Authentication.SignUp;
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Http;
+﻿using FlashFood.Models;
 using Microsoft.AspNetCore.Identity;
-using Microsoft.AspNetCore.Identity.Data;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.IdentityModel.Tokens;
 using User.Management.Service.Models;
-using User.Management.Service.Services.EmailService;
-using MimeKit;
-using MailKit.Net.Smtp;
 using User.Management.Service.Models.Authentication.SignUp;
 using User.Management.Service.Models.Authentication.LogIn;
 using User.Management.Service.Services;
 using User.Management.Data.Data;
-using System.Security.Cryptography;
+using User.Management.Service.Models.Authentication.User;
 
 namespace FlashFood.Controllers
 {
@@ -28,43 +15,44 @@ namespace FlashFood.Controllers
     public class AuthenticationController : ControllerBase
     {
         private readonly UserManager<ApplicationUser> _userManager;
-        private readonly RoleManager<IdentityRole> _roleManager;
-        private readonly IConfiguration _configuration;
         private readonly IEmailService _emailService;
         private readonly IUserService _userService;
-        public AuthenticationController(UserManager<ApplicationUser> userManager, RoleManager<IdentityRole> roleManager, 
-            IConfiguration configuration, IEmailService emailService, IUserService userService)
+
+        public AuthenticationController(UserManager<ApplicationUser> userManager,
+            IEmailService emailService,
+            IUserService user,
+            IConfiguration configuration)
         {
             _userManager = userManager;
-            _roleManager = roleManager;
-            _configuration = configuration;
             _emailService = emailService;
-            _userService = userService;
-
+            _userService = user;
         }
+
         [HttpPost]
         [Route("register")]
         public async Task<IActionResult> Register([FromBody] RegisterUser registerUser)
         {
             var tokenResponse = await _userService.CreateUserWithTokenAsync(registerUser);
-            if (tokenResponse.IsSuccess)
+            if (tokenResponse.IsSuccess && tokenResponse.Response != null)
             {
                 await _userService.AssignRoleToUserAsync(registerUser.Roles, tokenResponse.Response.User);
                 var confirmationLink = Url.Action(nameof(ConfirmEmail), "Authentication", new { tokenResponse.Response.Token, email = registerUser.Email }, Request.Scheme);
-                var message = new Message(new string[] { registerUser.Email! }, "Confirmation Email Link", confirmationLink!);
-                _emailService.SendEmail(message);
+                var message = new Message(new string[] { registerUser.Email! }, "FlashFood ~ Email Confirmation Link", confirmationLink!);
+                var responseMsg = _emailService.SendEmail(message);
                 return StatusCode(StatusCodes.Status200OK,
-                    new Response { Status = "Success", Message = "Email Sent Successfully!", IsSuccess = true });
+                    new Response { IsSuccess = true, Message = $"{tokenResponse.Message} {responseMsg}" });
+
             }
+
             return StatusCode(StatusCodes.Status500InternalServerError,
-                new Response {Message = tokenResponse.Message, IsSuccess = false });
+                new Response { Message = tokenResponse.Message, IsSuccess = false });
         }
 
         [HttpGet("confirm-email")]
         public async Task<IActionResult> ConfirmEmail(string token, string email)
         {
             var user = await _userManager.FindByEmailAsync(email);
-            if(user != null)
+            if (user != null)
             {
                 var result = await _userManager.ConfirmEmailAsync(user, token);
                 if (result.Succeeded)
@@ -74,133 +62,60 @@ namespace FlashFood.Controllers
                 }
             }
             return StatusCode(StatusCodes.Status500InternalServerError,
-                new Response { Status = "Error", Message = "There is no User with this email!" });
+                new Response { Status = "Error", Message = "This User Doesn't Exist!" });
         }
 
         [HttpPost]
         [Route("login")]
         public async Task<IActionResult> Login([FromBody] LoginModel loginModel)
         {
-            // Checking the user
-            var user = await _userManager.FindByNameAsync(loginModel.Username);
-            if(user != null && await _userManager.CheckPasswordAsync(user, loginModel.Password))
+            var loginOtpResponse = await _userService.GetOtpByLoginAsync(loginModel);
+            if (loginOtpResponse.Response != null)
             {
-                // Create claimlist
-                var authClaims = new List<Claim>
+                var user = loginOtpResponse.Response.User;
+                if (user.TwoFactorEnabled)
                 {
-                    new Claim(ClaimTypes.Name, user.UserName),
-                    new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
-                };
-
-                // Add roles to the claimlist
-                var userRoles = await _userManager.GetRolesAsync(user);
-                foreach(var role in userRoles)
-                {
-                    authClaims.Add(new Claim(ClaimTypes.Role, role));
+                    var token = loginOtpResponse.Response.Token;
+                    var message = new Message(new string[] { user.Email! }, "OTP Confirmation", token);
+                    _emailService.SendEmail(message);
+                    return StatusCode(StatusCodes.Status200OK,
+                        new Response { IsSuccess = loginOtpResponse.IsSuccess, Status = "Success", Message = $"We Have Sent An OTP To Your Email: {user.Email}." });
                 }
-
-                // Generate the token with the claims
-                var jwtToken = GetToken(authClaims);
-                var refreshToken = GenerateRefreshToken();
-                _ = int.TryParse(_configuration["JWT:RefreshTokenValidity"], out int refreshTokenValidity);
-                user.RefreshToken = refreshToken;
-                user.RefreshTokenExpiry = DateTime.UtcNow.AddDays(refreshTokenValidity);
-                await _userManager.UpdateAsync(user);
-
-                // Return the token
-                return Ok(new
+                if (user != null && await _userManager.CheckPasswordAsync(user, loginModel.Password))
                 {
-                    token = new JwtSecurityTokenHandler().WriteToken(jwtToken),
-                    expiration = jwtToken.ValidTo
-                });
+                    var serviceResponse = await _userService.GetJwtTokenAsync(user);
+                    return Ok(serviceResponse);
+
+                }
             }
             return Unauthorized();
+
         }
 
         [HttpPost]
-        [AllowAnonymous]
-        [Route("forgot-password")]
-        public async Task<IActionResult> ForgotPassword([Required] string email)
+        [Route("login-2FA")]
+        public async Task<IActionResult> LoginWithOTP(string code, string userName)
         {
-            var user = await _userManager.FindByEmailAsync(email);
-            if(user != null)
+            var jwt = await _userService.LoginUserWithJWTokenAsync(code, userName);
+            if (jwt.IsSuccess)
             {
-                var token = await _userManager.GeneratePasswordResetTokenAsync(user);
-                var forgotPasswordLink = Url.Action(nameof(ResetPassword), "Authentication", new { token, email = user.Email }, Request.Scheme);
-                var message = new Message(new string[] { user.Email! }, "Password Change Request", forgotPasswordLink!);
-                _emailService.SendEmail(message);
-                return StatusCode(StatusCodes.Status200OK,
-                    new Response { Status = "Success", Message = $"Password Change Request Has Been Sent To {user.Email}!" });
+                return Ok(jwt);
             }
-            return StatusCode(StatusCodes.Status500InternalServerError,
-                new Response { Status = "Error", Message = "There is no User with this email!" });
-        }
-
-        [HttpGet("reset-password")]
-        public async Task<IActionResult> ResetPassword(string token, string email)
-        {
-            var model = new ResetPassword { Token = token, Email = email }; 
-            return Ok(new
-            {
-                model
-            });
+            return StatusCode(StatusCodes.Status404NotFound,
+                new Response { Status = "Success", Message = $"Invalid Code" });
         }
 
         [HttpPost]
-        [AllowAnonymous]
-        [Route("reset-password")]
-        public async Task<IActionResult> ResetPassword(ResetPassword resetPassword)
+        [Route("refresh-token")]
+        public async Task<IActionResult> RefreshToken(LoginResponse tokens)
         {
-            var user = await _userManager.FindByEmailAsync(resetPassword.Email);
-            if(user != null)
+            var jwt = await _userService.RenewAccessTokenAsync(tokens);
+            if (jwt.IsSuccess)
             {
-                var resetPasswordResult = await _userManager.ResetPasswordAsync(user, resetPassword.Token, resetPassword.Password);
-                if(!resetPasswordResult.Succeeded)
-                {
-                    foreach(var error in resetPasswordResult.Errors)
-                    {
-                        ModelState.AddModelError(error.Code, error.Description);
-                    }
-                    return Ok(ModelState);
-                }
-                return StatusCode(StatusCodes.Status200OK,
-                    new Response { Status = "Success", Message = "Password Has Been Changed!" });
+                return Ok(jwt);
             }
-            return StatusCode(StatusCodes.Status400BadRequest,
-                new Response { Status = "Error", Message = "There is no User with this email!" });
+            return StatusCode(StatusCodes.Status404NotFound,
+                new Response { Status = "Success", Message = $"Invalid Code" });
         }
-
-        #region PrivateMethods
-        private JwtSecurityToken GetToken(List<Claim> authClaims)
-        {
-            var authSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_configuration["JWT:Secret"]));
-            _ = int.TryParse(_configuration["JWT:TokenValidityInMinutes"], out int tokenValidityInMinutes);
-            var expirationTimeUtc = DateTime.UtcNow.AddMinutes(tokenValidityInMinutes);
-            if (expirationTimeUtc.Kind == DateTimeKind.Local)
-            {
-                expirationTimeUtc = DateTime.SpecifyKind(expirationTimeUtc, DateTimeKind.Utc);
-            }
-            var expirationTimeInLocalTimeZone = TimeZoneInfo.ConvertTimeToUtc(expirationTimeUtc, TimeZoneInfo.Utc);
-
-
-            var token = new JwtSecurityToken(
-                issuer: _configuration["JWT:ValidIssuer"],
-                audience: _configuration["JWT:ValidAudience"],
-                expires: expirationTimeInLocalTimeZone,
-                claims: authClaims,
-                signingCredentials: new SigningCredentials(authSigningKey, SecurityAlgorithms.HmacSha256)
-            );
-
-            return token;
-        }
-
-        private string GenerateRefreshToken()
-        {
-            var randomNumber = new Byte[64];
-            var range = RandomNumberGenerator.Create();
-            range.GetBytes(randomNumber);
-            return Convert.ToBase64String(randomNumber);
-        }
-        #endregion
     }
 }
