@@ -7,9 +7,13 @@ using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using User.Management.Data.Data;
 using User.Management.Service.Models;
+using User.Management.Service.Repositories.OrderRepository;
+using User.Management.Service.Repositories.RestaurantRepository;
 using User.Management.Service.Services;
 
 var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddAutoMapper(typeof(Program));
 
 // For Entity Framework
 var configuration = builder.Configuration;
@@ -72,6 +76,8 @@ builder.Services.AddScoped<IEmailService, EmailService>();
 builder.Services.AddScoped<IUserService, UserService>();
 
 // Add services to the container.
+builder.Services.AddScoped<IRestaurantRepository, RestaurantRepository>();
+builder.Services.AddScoped<IOrderRepository, OrderRepository>();
 
 builder.Services.AddControllers();
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
