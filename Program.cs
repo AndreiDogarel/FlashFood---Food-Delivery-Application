@@ -6,14 +6,17 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using User.Management.Data.Data;
+using User.Management.Data.Data.DTOs;
 using User.Management.Service.Models;
+using User.Management.Service.Repositories.DishRepository;
 using User.Management.Service.Repositories.OrderRepository;
 using User.Management.Service.Repositories.RestaurantRepository;
 using User.Management.Service.Services;
+using User.Management.Service.Services.RestaurantService;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Services.AddAutoMapper(typeof(Program));
+builder.Services.AddAutoMapper(typeof(MappingProfile));
 
 // For Entity Framework
 var configuration = builder.Configuration;
@@ -78,6 +81,9 @@ builder.Services.AddScoped<IUserService, UserService>();
 // Add services to the container.
 builder.Services.AddScoped<IRestaurantRepository, RestaurantRepository>();
 builder.Services.AddScoped<IOrderRepository, OrderRepository>();
+builder.Services.AddScoped<IDishRepository, DishRepository>();
+builder.Services.AddScoped<IRestaurantService, RestaurantService>();
+
 
 builder.Services.AddControllers();
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
