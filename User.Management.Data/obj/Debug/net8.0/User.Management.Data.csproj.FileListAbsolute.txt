@@ -1,0 +1,14 @@
+C:\Users\andre\Source\Repos\User.Management.Data\bin\Debug\net8.0\User.Management.Data.deps.json
+C:\Users\andre\Source\Repos\User.Management.Data\bin\Debug\net8.0\User.Management.Data.runtimeconfig.json
+C:\Users\andre\Source\Repos\User.Management.Data\bin\Debug\net8.0\User.Management.Data.dll
+C:\Users\andre\Source\Repos\User.Management.Data\bin\Debug\net8.0\User.Management.Data.pdb
+C:\Users\andre\Source\Repos\User.Management.Data\obj\Debug\net8.0\User.Management.Data.csproj.AssemblyReference.cache
+C:\Users\andre\Source\Repos\User.Management.Data\obj\Debug\net8.0\User.Management.Data.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\andre\Source\Repos\User.Management.Data\obj\Debug\net8.0\User.Management.Data.AssemblyInfoInputs.cache
+C:\Users\andre\Source\Repos\User.Management.Data\obj\Debug\net8.0\User.Management.Data.AssemblyInfo.cs
+C:\Users\andre\Source\Repos\User.Management.Data\obj\Debug\net8.0\User.Management.Data.csproj.CoreCompileInputs.cache
+C:\Users\andre\Source\Repos\User.Management.Data\obj\Debug\net8.0\User.Management.Data.dll
+C:\Users\andre\Source\Repos\User.Management.Data\obj\Debug\net8.0\refint\User.Management.Data.dll
+C:\Users\andre\Source\Repos\User.Management.Data\obj\Debug\net8.0\User.Management.Data.pdb
+C:\Users\andre\Source\Repos\User.Management.Data\obj\Debug\net8.0\User.Management.Data.genruntimeconfig.cache
+C:\Users\andre\Source\Repos\User.Management.Data\obj\Debug\net8.0\ref\User.Management.Data.dll
