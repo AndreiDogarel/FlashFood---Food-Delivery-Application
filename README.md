@@ -1,1 +1,1 @@
-<title>FlashFood - Food Delivery Application</title>
+<h1>FlashFood - Food Delivery Application</h1>
